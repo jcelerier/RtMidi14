@@ -1,6 +1,7 @@
 #pragma once
 #include <iostream>
 #include <rtmidi17/rtmidi17.hpp>
+#include <rtmidi17/detail/midi_queue.hpp>
 #include <string_view>
 
 namespace rtmidi
@@ -132,10 +133,23 @@ public:
     }
   }
 
+  void set_processing_mode(processing_mode mode) noexcept
+  {
+    if (connected_)
+    {
+      warning(
+          "midi_in::set_processing_mode: must be called before open_port.");
+      return;
+    }
+
+    mode_ = mode;
+  }
+
   void set_callback(midi_in::message_callback callback)
   {
     inputData_.userCallback = std::move(callback);
   }
+
   void cancel_callback()
   {
     inputData_.userCallback = nullptr;
@@ -146,7 +160,7 @@ public:
     if (inputData_.userCallback)
     {
       warning(
-          "RtMidiIn::getNextMessage: a user callback is currently set for "
+          "midi_in::getNextMessage: a user callback is currently set for "
           "this port.");
       return {};
     }
@@ -164,7 +178,7 @@ public:
     if (inputData_.userCallback)
     {
       warning(
-          "RtMidiIn::getNextMessage: a user callback is currently set for "
+          "midi_in::get_message: a user callback is currently set for "
           "this port.");
       return {};
     }
@@ -172,59 +186,24 @@ public:
     return inputData_.queue.pop(m);
   }
 
-  struct midi_queue
+  bool poll(std::chrono::milliseconds timeout)
   {
-    unsigned int front{};
-    unsigned int back{};
-    unsigned int ringSize{};
-    std::unique_ptr<message[]> ring{};
-
-    bool push(const message& msg)
+    if (mode_ != processing_mode::MANUAL)
     {
-      auto [sz, _, b] = get_dimensions();
-
-      if (sz < ringSize - 1)
-      {
-        ring[b] = msg;
-        back = (back + 1) % ringSize;
-        return true;
-      }
-
+      warning("midi_in::poll: mode is not processing_mode::MANUAL.");
       return false;
     }
-    bool pop(message& msg)
-    {
-      auto [sz, f, _] = get_dimensions();
 
-      if (sz == 0)
-      {
-        return false;
-      }
+    return do_poll(timeout);
+  }
 
-      // Copy queued message to the vector pointer argument and then "pop" it.
-      using namespace std;
-      swap(msg, ring[f]);
+  virtual bool do_poll(std::chrono::milliseconds timeout)
+  {
+    warning("midi_in::poll: unsupported for this backend.");
+    return false;
+  }
 
-      // Update front
-      front = (front + 1) % ringSize;
-      return true;
-    }
-
-    struct dimensions
-    {
-      unsigned int size, front, back;
-    };
-    dimensions get_dimensions() const
-    {
-      // Access back/front members exactly once and make stack copies for
-      // size calculation ==> completely unneccessary
-      // https://godbolt.org/g/HPu9LA
-
-      return {(back >= front) ? back - front : ringSize - front + back, front, back};
-    }
-  };
-
-  // The RtMidiInData structure is used to pass private class data to
+  // The midi_inData structure is used to pass private class data to
   // the MIDI input handling function or thread.
   struct in_data
   {
@@ -240,12 +219,20 @@ public:
 
 protected:
   in_data inputData_{};
+  processing_mode mode_{processing_mode::THREAD};
 };
 
 class midi_out_api : public midi_api
 {
 public:
   virtual void send_message(const unsigned char* message, size_t size) = 0;
+
+  void set_chunking_parameters(std::optional<chunking_parameters> parameters)
+  {
+    chunking = std::move(parameters);
+  }
+
+  std::optional<chunking_parameters> chunking;
 };
 
 template <typename T>

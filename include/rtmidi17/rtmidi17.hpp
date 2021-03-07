@@ -56,12 +56,16 @@
  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  POSSIBILITY OF SUCH DAMAGE.
 */
+
+#include <rtmidi17/message.hpp>
+
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <memory>
-#include <rtmidi17/message.hpp>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -99,6 +103,14 @@ enum midi_error
   DRIVER_ERROR,      /*!< A system driver error occured. */
   SYSTEM_ERROR,      /*!< A system error occured. */
   THREAD_ERROR       /*!< A thread error occured. */
+};
+
+//! Defines whether processing of incoming messages will be done
+//! in a thread managed by the library, or if the user has to invoke poll() manually
+//! in a thread of its own choosing.
+enum processing_mode {
+  THREAD,
+  MANUAL
 };
 
 //! Base exception class for MIDI problems
@@ -171,11 +183,13 @@ enum class API
 {
   UNSPECIFIED, /*!< Search for a working compiled API. */
   MACOSX_CORE, /*!< Macintosh OS-X Core Midi API. */
-  LINUX_ALSA,  /*!< The Advanced Linux Sound Architecture API. */
-  UNIX_JACK,   /*!< The JACK Low-Latency MIDI Server API. */
-  WINDOWS_MM,  /*!< The Microsoft Multimedia MIDI API. */
+  LINUX_ALSA, /*!< The Advanced Linux Sound Architecture API. */
+  LINUX_ALSA_SEQ = LINUX_ALSA,
+  LINUX_ALSA_RAW, /*!< Raw ALSA API. */
+  UNIX_JACK, /*!< The JACK Low-Latency MIDI Server API. */
+  WINDOWS_MM, /*!< The Microsoft Multimedia MIDI API. */
   WINDOWS_UWP, /*!< The Microsoft WinRT MIDI API. */
-  DUMMY        /*!< A compilable but non-functional API. */
+  DUMMY       /*!< A compilable but non-functional API. */
 };
 
 /**
@@ -208,6 +222,25 @@ public:
 
 private:
   std::unique_ptr<class observer_api> impl_;
+};
+
+/**
+ * Used to determine how large sent messages will be chunked.
+ */
+struct RTMIDI17_EXPORT chunking_parameters {
+  std::chrono::milliseconds interval{};
+  int32_t size{};
+
+  /**
+   * @brief Will be called by the chunking code to allow the API user to wait.
+   *
+   * By default just calls sleep.
+   * Arguments are: the time that must be waited, the bytes currently written.
+   * Return false if you want to abort the transfer, and true otherwise.
+   */
+  std::function<bool(std::chrono::microseconds, int)> wait = chunking_parameters::default_wait;
+
+  static bool default_wait(std::chrono::microseconds time_to_wait, int written_bytes);
 };
 
 /**********************************************************************/
@@ -309,6 +342,16 @@ public:
   */
   void set_callback(message_callback callback);
 
+  /**
+   * @brief Configure how the library processes messages.
+   *
+   * This method will have no effect if it is invoked while a port is open:
+   * call it before open_port.
+   *
+   * @see processing_mode
+   */
+  void set_processing_mode(processing_mode mode);
+
   //! Cancel use of the current callback function (if one exists).
   /*!
     Subsequent incoming MIDI messages will be written to the queue
@@ -364,6 +407,17 @@ public:
   message get_message();
 
   bool get_message(message&);
+
+  /**
+   * @brief poll for incoming MIDI messages.
+   *
+   * @param timeout in milliseconds for the polling process.
+   * @return false if the polling was unsuccessful.
+   *
+   * Behaviour is undefined if set_processing_mode(processing_mode::MANUAL)
+   * was not called beforehand.
+   */
+  bool poll(std::chrono::milliseconds timeout = std::chrono::milliseconds{50});
 
   //! Set an error callback function to be invoked when an error has occured.
   /*!
@@ -506,6 +560,12 @@ public:
   void set_client_name(std::string_view clientName);
 
   void set_port_name(std::string_view portName);
+
+  /**
+   * For large messages, chunk their content and wait.
+   * Setting a null optional will disable chunking.
+   */
+  void set_chunking_parameters(std::optional<chunking_parameters> parameters);
 
 private:
   std::unique_ptr<class midi_out_api> rtapi_;

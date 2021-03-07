@@ -25,6 +25,8 @@ else()
     include/rtmidi17/detail/dummy.hpp
     include/rtmidi17/detail/jack.hpp
     include/rtmidi17/detail/midi_api.hpp
+    include/rtmidi17/detail/raw_alsa.hpp
+    include/rtmidi17/detail/raw_alsa_helpers.hpp
     include/rtmidi17/detail/semaphore.hpp
     include/rtmidi17/detail/winmm.hpp
     include/rtmidi17/detail/winuwp.hpp
@@ -162,6 +164,9 @@ if(RTMIDI17_EXAMPLES)
 
   add_executable(cmidiin tests/cmidiin.cpp)
   target_link_libraries(cmidiin PRIVATE RtMidi17)
+
+  add_executable(midiin_poll tests/midiin_poll.cpp)
+  target_link_libraries(midiin_poll PRIVATE RtMidi17)
 
   add_executable(midiclock_in tests/midiclock_in.cpp)
   target_link_libraries(midiclock_in PRIVATE RtMidi17)

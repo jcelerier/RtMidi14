@@ -1,5 +1,6 @@
 #include <cmath>
 #include <sstream>
+#include <thread>
 
 #if !defined(RTMIDI17_HEADER_ONLY)
 #  include <rtmidi17/rtmidi17.hpp>
@@ -18,6 +19,7 @@
 
 #if defined(RTMIDI17_ALSA)
 #  include <rtmidi17/detail/alsa.hpp>
+#  include <rtmidi17/detail/raw_alsa.hpp>
 #endif
 
 #if defined(RTMIDI17_JACK)
@@ -53,28 +55,23 @@ constexpr auto make_tl(unused, Args...)
 static constexpr auto available_backends = make_tl(
     0
 #if defined(RTMIDI17_ALSA)
-    ,
-    alsa_backend {}
+      , raw_alsa_backend {}
+    , alsa_backend {}
 #endif
 #if defined(RTMIDI17_COREAUDIO)
-    ,
-    core_backend {}
+    , core_backend {}
 #endif
 #if defined(RTMIDI17_JACK)
-    ,
-    jack_backend {}
+    , jack_backend {}
 #endif
 #if defined(RTMIDI17_WINMM)
-    ,
-    winmm_backend {}
+    , winmm_backend {}
 #endif
 #if defined(RTMIDI17_WINUWP)
-    ,
-    winuwp_backend {}
+    , winuwp_backend {}
 #endif
 #if defined(RTMIDI17_DUMMY)
-    ,
-    dummy_backend {}
+    , dummy_backend {}
 #endif
 );
 
@@ -108,6 +105,12 @@ RTMIDI17_INLINE thread_error::~thread_error() = default;
 
 RTMIDI17_INLINE midi_in::~midi_in() = default;
 RTMIDI17_INLINE midi_out::~midi_out() = default;
+
+RTMIDI17_INLINE
+bool chunking_parameters::default_wait(std::chrono::microseconds time_to_wait, int written_bytes) {
+  std::this_thread::sleep_for(time_to_wait);
+  return true;
+}
 
 [[nodiscard]] RTMIDI17_INLINE std::vector<rtmidi::API> available_apis() noexcept
 {
@@ -197,6 +200,12 @@ void midi_in::set_callback(message_callback callback)
 }
 
 RTMIDI17_INLINE
+void midi_in::set_processing_mode(processing_mode mode)
+{
+  (static_cast<midi_in_api*>(rtapi_.get()))->set_processing_mode(mode);
+}
+
+RTMIDI17_INLINE
 void midi_in::cancel_callback()
 {
   (static_cast<midi_in_api*>(rtapi_.get()))->cancel_callback();
@@ -230,6 +239,13 @@ RTMIDI17_INLINE
 bool midi_in::get_message(message& msg)
 {
   return (static_cast<midi_in_api*>(rtapi_.get()))->get_message(msg);
+}
+
+RTMIDI17_INLINE
+[[nodiscard]]
+bool midi_in::poll(std::chrono::milliseconds timeout)
+{
+  return (static_cast<midi_in_api*>(rtapi_.get()))->poll(timeout);
 }
 
 RTMIDI17_INLINE
@@ -413,5 +429,11 @@ RTMIDI17_INLINE
 void midi_out::set_port_name(std::string_view portName)
 {
   rtapi_->set_port_name(portName);
+}
+
+RTMIDI17_INLINE
+void midi_out::set_chunking_parameters(std::optional<chunking_parameters> parameters)
+{
+  rtapi_->set_chunking_parameters(std::move(parameters));
 }
 }
